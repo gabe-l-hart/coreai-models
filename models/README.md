@@ -205,6 +205,7 @@ uv run models/<name>/export.py --include-debug-info   # embed debug information 
 - [Gemma 3](gemma3)
 - [Gemma 4](gemma4)
 - [GPT-OSS](gpt_oss)
+- [Granite](granite)
 - [Mistral](mistral)
 - [Mixtral](mixtral)
 - [Muse Glimmer](muse_glimmer)

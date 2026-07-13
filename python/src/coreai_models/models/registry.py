@@ -114,6 +114,7 @@ class ModelEntry:
 @lru_cache(maxsize=1)
 def _get_registry() -> dict[str, ModelEntry]:
     """Build the model registry (cached singleton). Lazy imports to avoid circular deps."""
+    from coreai_models.models.ios.granite import GraniteForCausalLMForiOS
     from coreai_models.models.ios.mistral import MistralForCausalLMForiOS
     from coreai_models.models.ios.olmo2 import Olmo2ForCausalLMForiOS
     from coreai_models.models.ios.qwen2 import Qwen2ForCausalLMForiOS
@@ -122,6 +123,7 @@ def _get_registry() -> dict[str, ModelEntry]:
     from coreai_models.models.macos.gemma3_text import Gemma3ForCausalLM
     from coreai_models.models.macos.gemma3n import Gemma3nForCausalLM
     from coreai_models.models.macos.gpt_oss import GptOssForCausalLM
+    from coreai_models.models.macos.granite import GraniteForCausalLM
     from coreai_models.models.macos.mistral import MistralForCausalLM
     from coreai_models.models.macos.mixtral import MixtralForCausalLM
     from coreai_models.models.macos.muse_glimmer import MuseGlimmerForCausalLM
@@ -152,6 +154,10 @@ def _get_registry() -> dict[str, ModelEntry]:
         ),
         "gpt_oss": ModelEntry(
             macos_class=GptOssForCausalLM,
+        ),
+        "granite": ModelEntry(
+            macos_class=GraniteForCausalLM,
+            ios_class=GraniteForCausalLMForiOS,
         ),
         "mistral": ModelEntry(
             macos_class=MistralForCausalLM,
