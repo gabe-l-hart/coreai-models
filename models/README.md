@@ -121,6 +121,7 @@ uv run models/<name>/export.py
 
 - [Gemma 3](gemma3)
 - [GPT-OSS](gpt_oss)
+- [Granite](granite)
 - [Mistral](mistral)
 - [Mixtral](mixtral)
 - [Qwen2.5](qwen2)

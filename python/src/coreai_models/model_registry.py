@@ -131,6 +131,16 @@ LLM_PRESETS: list[ModelPreset] = [
     ModelPreset(
         "gpt-oss-20b", "openai/gpt-oss-20b", "gpt-oss", "llm", "macOS", "none", "bfloat16", 32768
     ),
+    ModelPreset(
+        "granite-4.1-3b",
+        "ibm-granite/granite-4.1-3b",
+        "granite",
+        "llm",
+        "macOS",
+        "4bit",
+        "float16",
+        8192,
+    ),
     # --- iOS (compression = palettized) ---
     ModelPreset(
         "qwen3-0.6b",
