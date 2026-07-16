@@ -141,6 +141,16 @@ LLM_PRESETS: list[ModelPreset] = [
         "float16",
         8192,
     ),
+    ModelPreset(
+        "granite-3.1-3b-a800m-instruct",
+        "ibm-granite/granite-3.1-3b-a800m-instruct",
+        "granite",
+        "llm",
+        "macOS",
+        "4bit",
+        "float16",
+        131072,
+    ),
     # --- iOS (compression = palettized) ---
     ModelPreset(
         "qwen3-0.6b",

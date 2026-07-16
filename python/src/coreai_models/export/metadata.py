@@ -122,6 +122,24 @@ _METADATA: dict[str, AIModelMetadataFields] = {
             "Source: https://huggingface.co/openai/gpt-oss-20b"
         ),
     ),
+    "ibm-granite/granite-4.1-3b": AIModelMetadataFields(
+        author="OpenAI",
+        license="Apache-2.0",
+        model_description=(
+            "Granite-4.1-3B is a 3B parameter long-context instruct model "
+            "from IBM. "
+            "Source: https://huggingface.co/ibm-granite/granite-4.1-3b"
+        ),
+    ),
+    "ibm-granite/granite-3.1-3b-a800m-instruct": AIModelMetadataFields(
+        author="OpenAI",
+        license="Apache-2.0",
+        model_description=(
+            "Granite-3.1-3B-A800M-Instruct is a 3B parameter MoE long-context "
+            "instruct model with 800m active parameters from IBM. "
+            "Source: https://huggingface.co/ibm-granite/granite-3.1-3b-a800m-instruct"
+        ),
+    ),
     # ---- VLMs ----
     "Qwen/Qwen3-VL-2B-Instruct": AIModelMetadataFields(
         author="Qwen Team",
