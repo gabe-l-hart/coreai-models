@@ -139,7 +139,7 @@ LLM_PRESETS: list[ModelPreset] = [
         "macOS",
         "4bit",
         "float16",
-        8192,
+        131072,
     ),
     ModelPreset(
         "granite-3.1-3b-a800m-instruct",
