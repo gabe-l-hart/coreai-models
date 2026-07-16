@@ -6,7 +6,8 @@ IBM's Granite Mixture-of-Experts models for on-device inference via Core AI.
 
 | Model                | Parameters (Total/Active) | macOS | iOS |
 | -------------------- | ------------------------- | ----- | --- |
-| Granite 3.1 3b-A800M | 3B / 800M                 | Yes   | Yes |
+| Granite 3.1 3B-A800M | 3B / 800M                 | Yes   | Yes |
+| Granite 3.1 1B-A400M | 1B / 400M                 | Yes   | Yes |
 
 ## Setup to export models
 

@@ -131,13 +131,40 @@ _METADATA: dict[str, AIModelMetadataFields] = {
             "Source: https://huggingface.co/ibm-granite/granite-4.1-3b"
         ),
     ),
+    "ibm-granite/granite-4.1-8b": AIModelMetadataFields(
+        author="OpenAI",
+        license="Apache-2.0",
+        model_description=(
+            "Granite-4.1-8B is a 8B parameter long-context instruct model "
+            "from IBM. "
+            "Source: https://huggingface.co/ibm-granite/granite-4.1-8b"
+        ),
+    ),
+    "ibm-granite/granite-4.1-30b": AIModelMetadataFields(
+        author="OpenAI",
+        license="Apache-2.0",
+        model_description=(
+            "Granite-4.1-30B is a 30B parameter long-context instruct model "
+            "from IBM. "
+            "Source: https://huggingface.co/ibm-granite/granite-4.1-30b"
+        ),
+    ),
     "ibm-granite/granite-3.1-3b-a800m-instruct": AIModelMetadataFields(
         author="OpenAI",
         license="Apache-2.0",
         model_description=(
             "Granite-3.1-3B-A800M-Instruct is a 3B parameter MoE long-context "
-            "instruct model with 800m active parameters from IBM. "
+            "instruct model with 800M active parameters from IBM. "
             "Source: https://huggingface.co/ibm-granite/granite-3.1-3b-a800m-instruct"
+        ),
+    ),
+    "ibm-granite/granite-3.1-1b-a400m-instruct": AIModelMetadataFields(
+        author="OpenAI",
+        license="Apache-2.0",
+        model_description=(
+            "Granite-3.1-1B-A400M-Instruct is a 1B parameter MoE long-context "
+            "instruct model with 400M active parameters from IBM. "
+            "Source: https://huggingface.co/ibm-granite/granite-3.1-1b-a400m-instruct"
         ),
     ),
     # ---- VLMs ----
