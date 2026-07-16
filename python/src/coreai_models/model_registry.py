@@ -234,16 +234,6 @@ LLM_PRESETS: list[ModelPreset] = [
         _model_type_override="qwen2",
     ),
     ModelPreset(
-        "granite-4.1-3b",
-        "ibm-granite/granite-4.1-3b",
-        "granite",
-        "llm",
-        "macOS",
-        "4bit",
-        "float16",
-        8192,
-    ),
-    ModelPreset(
         "smollm2-360m-instruct",
         "HuggingFaceTB/SmolLM2-360M-Instruct",
         "smollm2",
@@ -318,6 +308,26 @@ LLM_PRESETS: list[ModelPreset] = [
         "4bit",
         "float16",
         4096,
+    ),
+    ModelPreset(
+        "granite-4.1-3b",
+        "ibm-granite/granite-4.1-3b",
+        "granite",
+        "llm",
+        "macOS",
+        "4bit",
+        "float16",
+        131072,
+    ),
+    ModelPreset(
+        "granite-3.1-3b-a800m-instruct",
+        "ibm-granite/granite-3.1-3b-a800m-instruct",
+        "granite",
+        "llm",
+        "macOS",
+        "4bit",
+        "float16",
+        131072,
     ),
     # --- iOS (compression = palettized) ---
     ModelPreset(
