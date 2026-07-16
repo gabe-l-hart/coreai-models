@@ -30,69 +30,29 @@ from coreai_models.primitives.macos.cache import KVCache
 from coreai_models.primitives.macos.rms_norm import RMSNorm
 from coreai_models.primitives.macos.rope import initialize_rope
 from coreai_models.primitives.macos.sdpa import SDPA
+from coreai_models.primitives.macos.switch import SwitchGLU
 
 
-class GraniteMoeMoEExperts(nn.Module):
-    """Mixture-of-experts block with top-k routing.
-
-    The HF state dict stores:
-      gate_up_proj: [num_experts, 2*intermediate_size, hidden_size]
-      down_proj:    [num_experts, hidden_size, intermediate_size]
-    and a separate router weight [num_experts, hidden_size].
-
-    Forward: for each token, route to top-k experts, compute, and combine.
-    """
-
-    def __init__(self, config: GraniteMoeConfig) -> None:
+class SparseMoeBlock(nn.Module):
+    def __init__(self, dim: int, hidden_dim: int, num_experts: int, top_k: int) -> None:
         super().__init__()
-        self.hidden_size = config.hidden_size
-        self.intermediate_size = config.intermediate_size
-        self.num_experts = config.num_local_experts
-        self.num_experts_per_tok = config.num_experts_per_tok
-        self.act = nn.SiLU()
+        self.top_k = top_k
+        self.gate = nn.Linear(dim, num_experts, bias=False)
+        self.switch_mlp = SwitchGLU(dim, hidden_dim, num_experts)
 
-        self.router = nn.Linear(config.hidden_size, config.num_local_experts, bias=False)
-        # Fused gate + up: [num_experts, 2*intermediate_size, hidden_size]
-        self.gate_up_proj = nn.Parameter(
-            torch.empty(config.num_local_experts, 2 * config.intermediate_size, config.hidden_size)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        router_logits = self.gate(x).to(torch.float32)
+
+        top_logits, active_experts_indices = torch.topk(
+            router_logits, self.top_k, dim=-1, largest=True
         )
-        # [num_experts, hidden_size, intermediate_size]
-        self.down_proj = nn.Parameter(
-            torch.empty(config.num_local_experts, config.hidden_size, config.intermediate_size)
-        )
+        active_experts_scores = torch.softmax(top_logits, dim=-1).to(x.dtype)
 
-    def forward(
-        self,
-        hidden_states: torch.Tensor,
-    ) -> torch.Tensor:
-        bsz, length, _ = hidden_states.shape
-        # Flatten tokens
-        hidden_states = hidden_states.reshape(-1, self.hidden_size)
-        num_tokens = hidden_states.size(0)
-
-        # Router: [num_tokens, num_experts] -> top-k indices and weights
-        router_logits = self.router(hidden_states)
-        top_k_logits, top_k_index = router_logits.topk(self.num_experts_per_tok, dim=-1)
-        top_k_weights = torch.softmax(top_k_logits, dim=-1).type_as(hidden_states)
-
-        # Compute output using index_add pattern
-        final_hidden_states = torch.zeros_like(hidden_states)
-        with torch.no_grad():
-            expert_mask = nn.functional.one_hot(top_k_index, num_classes=self.num_experts)
-            expert_mask = expert_mask.permute(2, 1, 0)
-            expert_hit = torch.greater(expert_mask.sum(dim=(-1, -2)), 0).nonzero()
-
-        for expert_idx in expert_hit:
-            expert_idx = expert_idx[0]
-            top_k_pos, token_idx = torch.where(expert_mask[expert_idx])
-            current_state = hidden_states[token_idx]
-            gate, up = nn.functional.linear(current_state, self.gate_up_proj[expert_idx]).chunk(2, dim=-1)
-            current_hidden_states = self.act(gate) * up
-            current_hidden_states = nn.functional.linear(current_hidden_states, self.down_proj[expert_idx])
-            current_hidden_states = current_hidden_states * top_k_weights[token_idx, top_k_pos, None]
-            final_hidden_states.index_add_(0, token_idx, current_hidden_states.to(final_hidden_states.dtype))
-
-        return final_hidden_states.view(bsz, length, self.hidden_size)
+        y_active_experts = self.switch_mlp(x, active_experts_indices)
+        active_experts_scores = active_experts_scores.unsqueeze(-1).to(y_active_experts.device)
+        y_active_experts_weighted_by_scores = y_active_experts * active_experts_scores
+        y_active_experts_summary = torch.sum(y_active_experts_weighted_by_scores, dim=-2)
+        return y_active_experts_summary.to(device=x.device, dtype=x.dtype)
 
 
 class GraniteMoeAttention(nn.Module):
@@ -165,7 +125,12 @@ class GraniteMoeDecoderLayer(nn.Module):
     def __init__(self, config: GraniteMoeConfig, layer_idx: int) -> None:
         super().__init__()
         self.self_attn = GraniteMoeAttention(config, layer_idx=layer_idx)
-        self.moe = GraniteMoeMoEExperts(config)
+        self.moe = SparseMoeBlock(
+            dim=config.hidden_size,
+            hidden_dim=config.intermediate_size,
+            num_experts=config.num_local_experts,
+            top_k=config.num_experts_per_tok,
+        )
 
         self.input_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.post_attention_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
@@ -233,15 +198,18 @@ class GraniteMoeForCausalLM(BaseForCausalLM):
 
     @override
     def _mutate_state_dict(self: Self, state_dict: dict[str, torch.Tensor]) -> None:
-        """Transform HF state dict to match our parameter layout.
+        """Transform HF state dict to match our SwitchGLU layout.
 
         HF experts store:
-          gate_up_proj: [num_experts, 2*intermediate_size, hidden_size]  (already fused)
-          down_proj:    [num_experts, hidden_size, intermediate_size]
+          input_linear.weight: [num_experts, 2*intermediate_size, hidden_size]  (fused gate+up)
+          output_linear.weight: [num_experts, hidden_size, intermediate_size]
+          router.layer.weight: [num_experts, hidden_size]
 
-        HF router stores weight as [num_experts, hidden_size] which
-        matches our nn.Linear(num_experts, hidden_size, bias=False)
-        reversed → Linear expects [hidden_size, num_experts].
+        SwitchGLU expects:
+          gate_proj.weight: [1, num_experts, intermediate_size, hidden_size]
+          up_proj.weight: [1, num_experts, intermediate_size, hidden_size]
+          down_proj.weight: [1, num_experts, hidden_size, intermediate_size]
+          router.weight: [hidden_size, num_experts]
         """
         max_layer = -1
         for k in state_dict:
@@ -256,20 +224,38 @@ class GraniteMoeForCausalLM(BaseForCausalLM):
             raise ValueError("invalid state_dict")
 
         for i in range(max_layer + 1):
-            # ---- MoE Experts: gate_up_proj is already [E, 2*I, D] in HF ----
-            hf_gate_up = state_dict[f"model.layers.{i}.block_sparse_moe.experts.gate_up_proj"]
-            hf_down = state_dict[f"model.layers.{i}.block_sparse_moe.experts.down_proj"]
+            # Skip layers whose keys are not present in this (single-layer) state dict
+            moe_prefix = f"model.layers.{i}.block_sparse_moe"
+            if f"{moe_prefix}.input_linear.weight" not in state_dict:
+                continue
 
-            state_dict[f"model.layers.{i}.moe.gate_up_proj"] = hf_gate_up
-            state_dict[f"model.layers.{i}.moe.down_proj"] = hf_down
+            # ---- Split fused gate+up into separate gate_proj and up_proj ----
+            hf_input_linear = state_dict[f"{moe_prefix}.input_linear.weight"]  # [E, 2*I, D]
+            # Split along the intermediate dimension: first half = gate, second half = up
+            hf_gate_up = hf_input_linear.chunk(2, dim=1)  # [E, I, D], [E, I, D]
+            gate_weight = hf_gate_up[0].unsqueeze(0)  # [1, E, I, D]
+            up_weight = hf_gate_up[1].unsqueeze(0)  # [1, E, I, D]
 
-            del state_dict[f"model.layers.{i}.block_sparse_moe.experts.gate_up_proj"]
-            del state_dict[f"model.layers.{i}.block_sparse_moe.experts.down_proj"]
+            state_dict[f"model.layers.{i}.moe.switch_mlp.gate_proj.weight"] = gate_weight
+            state_dict[f"model.layers.{i}.moe.switch_mlp.up_proj.weight"] = up_weight
 
-            # ---- Router: HF weight is [E, D], Linear expects [D, E] ----
-            hf_router_w = state_dict[f"model.layers.{i}.block_sparse_moe.router.weight"]
-            state_dict[f"model.layers.{i}.moe.router.weight"] = hf_router_w.t()
-            del state_dict[f"model.layers.{i}.block_sparse_moe.router.weight"]
+            del state_dict[f"{moe_prefix}.input_linear.weight"]
+
+            # ---- Output linear (down_proj) ----
+            hf_output_linear = state_dict[f"{moe_prefix}.output_linear.weight"]  # [E, D, I]
+            down_weight = hf_output_linear.unsqueeze(0)  # [1, E, D, I]
+            state_dict[f"model.layers.{i}.moe.switch_mlp.down_proj.weight"] = down_weight
+            del state_dict[f"{moe_prefix}.output_linear.weight"]
+
+            # ---- Router: HF weight is [E, D], nn.Linear(num_experts, dim) expects [E, D] ----
+            hf_router_w = state_dict[f"{moe_prefix}.router.layer.weight"]
+            state_dict[f"model.layers.{i}.moe.gate.weight"] = hf_router_w
+            del state_dict[f"{moe_prefix}.router.layer.weight"]
 
             # ---- Attention: HF uses separate q/k/v (already matches our layout) ----
-            # No mutation needed — GraniteMoeAttention uses q_proj, k_proj, v_proj separately.
+            # No mutation needed - GraniteMoeAttention uses q_proj, k_proj, v_proj separately.
+
+    def load_state_dict(self, state_dict, strict: bool = True, assign: bool = False):
+        super().load_state_dict(state_dict, strict=strict, assign=assign)
+        if self.config.tie_word_embeddings:
+            self.lm_head.weight = self.model.embed_tokens.weight
