@@ -6,7 +6,9 @@ IBM's Granite models for on-device inference via Core AI.
 
 | Model               | Parameters | macOS | iOS |
 | ------------------- | ---------- | ----- | --- |
-| Granite 4.1 3B      | 3.0B       | Yes   | Yes |
+| Granite 4.1 3B      | 3B         | Yes   | Yes |
+| Granite 4.1 8B      | 8B         | Yes   | Yes |
+| Granite 4.1 30B     | 30B        | Yes   | Yes |
 
 ## Setup to export models
 
