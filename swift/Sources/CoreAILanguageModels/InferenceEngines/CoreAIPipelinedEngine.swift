@@ -533,8 +533,7 @@ private struct EngineImpl: ~Copyable {
         }
 
         // Allocate pipeline-depth-matched decode logits buffers (inference writes logits for decode)
-        let decodeLogitsResolved = logitsDesc.resolvingDynamicDimensions([1, 1, config.vocabSize])
-        let decodeLogitsSize = decodeLogitsResolved.minimumByteCount
+        let decodeLogitsSize = logitsDesc.resolvingDynamicDimensions([1, 1, config.vocabSize]).minimumByteCount
         var decodeLogBufs: [MTLBuffer] = []
         for _ in 0..<pipelineDepth {
             guard let buf = device.makeBuffer(length: decodeLogitsSize, options: .storageModeShared) else {
