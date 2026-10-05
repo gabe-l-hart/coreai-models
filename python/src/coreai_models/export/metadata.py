@@ -248,6 +248,33 @@ _METADATA: dict[str, AIModelMetadataFields] = {
             "Source: https://huggingface.co/ibm-granite/granite-4.1-30b"
         ),
     ),
+    "ibm-granite/granite-4.2-3b": AIModelMetadataFields(
+        author="OpenAI",
+        license="Apache-2.0",
+        model_description=(
+            "Granite-4.2-3B is a 3B parameter long-context thinking model "
+            "from IBM. "
+            "Source: https://huggingface.co/ibm-granite/granite-4.2-3b"
+        ),
+    ),
+    "ibm-granite/granite-4.2-8b": AIModelMetadataFields(
+        author="OpenAI",
+        license="Apache-2.0",
+        model_description=(
+            "Granite-4.2-8B is a 8B parameter long-context thinking model "
+            "from IBM. "
+            "Source: https://huggingface.co/ibm-granite/granite-4.2-8b"
+        ),
+    ),
+    "ibm-granite/granite-4.2-30b": AIModelMetadataFields(
+        author="OpenAI",
+        license="Apache-2.0",
+        model_description=(
+            "Granite-4.2-30B is a 30B parameter long-context thinking model "
+            "from IBM. "
+            "Source: https://huggingface.co/ibm-granite/granite-4.2-30b"
+        ),
+    ),
     "ibm-granite/granite-3.1-3b-a800m-instruct": AIModelMetadataFields(
         author="OpenAI",
         license="Apache-2.0",
