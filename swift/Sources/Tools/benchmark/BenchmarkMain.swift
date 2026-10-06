@@ -11,6 +11,44 @@ import CoreAILanguageModels
 import CoreAIShared
 import Foundation
 
+// MARK: - Engine Pool
+
+/// A thread-safe pool of inference engines. Each engine in the pool is owned by a single
+/// task at a time. The pool hands out engines on `acquire()` and returns them to the pool
+/// on `release()`. This is required because Core AI engines (e.g. CoreAIPipelinedEngine)
+/// use a shared atomic flag that traps when accessed concurrently.
+actor EnginePool {
+    private var engines: [any InferenceEngine] = []
+    private var available: [Int] = []
+
+    init(count: Int, engineFactory: @escaping () async throws -> any InferenceEngine) async throws {
+        for _ in 0..<count {
+            engines.append(try await engineFactory())
+        }
+        for i in 0..<count {
+            available.append(i)
+        }
+    }
+
+    /// Acquire an engine from the pool. Returns the engine index so it can be released later.
+    func acquire() async -> Int {
+        guard !available.isEmpty else {
+            fatalError("No available engines in pool")
+        }
+        return available.removeLast()
+    }
+
+    /// Release an engine back to the pool.
+    func release(_ idx: Int) async {
+        available.append(idx)
+    }
+
+    /// Get an engine by its index (only valid while it's in the pool).
+    func engine(at idx: Int) -> any InferenceEngine {
+        engines[idx]
+    }
+}
+
 @main
 struct Main {
     static func main() async throws {
@@ -56,6 +94,12 @@ struct LLMBenchmark: AsyncParsableCommand {
     )
     var chunkThreshold: Int?
 
+    @Option(
+        name: [.customShort("c"), .customLong("concurrent-requests")],
+        help: "Number of concurrent inference requests to run in parallel (default: 1, i.e. sequential)"
+    )
+    var concurrentRequests: Int = 1
+
     @Flag(
         name: .customLong("clear-coreai-cache"),
         help: "Clear Core AI cached specialization for this model before loading (forces re-specialization)"
@@ -66,6 +110,7 @@ struct LLMBenchmark: AsyncParsableCommand {
         if promptTokens < 1 { throw ValidationError("--prompt-tokens must be >= 1") }
         if generationTokens < 1 { throw ValidationError("--generation-tokens must be >= 1") }
         if numTrials < 1 { throw ValidationError("--num-trials must be >= 1") }
+        if concurrentRequests < 1 { throw ValidationError("--concurrent-requests must be >= 1") }
         if !FileManager.default.fileExists(atPath: model) {
             throw ValidationError("Model path not found: \(model)")
         }
@@ -114,6 +159,20 @@ struct LLMBenchmark: AsyncParsableCommand {
         let cacheSuffix = cacheHit ? " (cache hit)" : ""
         print(" done in \(fmt(prepareSeconds))s\(cacheSuffix)")
 
+        // Create an engine pool if we want to run concurrent requests in parallel.
+        // Core AI engines are not safe to share across concurrent tasks, so we pool
+        // separate engine instances instead.
+        let enginePool: EnginePool? = concurrentRequests > 1 ? try await EnginePool(
+            count: concurrentRequests,
+            engineFactory: {
+                return try await EngineFactory.createEngine(
+                    config: configData,
+                    modelURL: modelURL,
+                    options: engineOptions
+                )
+            }
+        ) : nil
+
         let prompt = randomPrompt(vocabSize: vocabSize, count: promptTokens, seed: seed)
         let sampling = SamplingConfiguration(temperature: 0)
 
@@ -121,21 +180,65 @@ struct LLMBenchmark: AsyncParsableCommand {
         print("\n⚙️  Warming up engine...", terminator: "")
         fflush(stdout)
         let warmupStart = SuspendingClock.now
-        _ = try await runTrial(engine: engine, prompt: prompt, sampling: sampling)
+        if let enginePool {
+            let idx = try await enginePool.acquire()
+            _ = await runTrialSafely(engine: await enginePool.engine(at: idx), prompt: prompt, sampling: sampling)
+            try? await enginePool.release(idx)
+        } else {
+            _ = await runTrialSafely(engine: engine, prompt: prompt, sampling: sampling)
+        }
         let warmupSeconds = (SuspendingClock.now - warmupStart).inSeconds
         print(" done in \(fmt(warmupSeconds))s")
 
         // Timed trials
         print("\n🔄 Benchmarking with \(promptTokens) prompt tokens, \(generationTokens) generation tokens\n")
-        var trials: [TrialResult] = []
 
-        for i in 0..<numTrials {
-            let r = try await runTrial(engine: engine, prompt: prompt, sampling: sampling)
-            trials.append(r)
-            if i > 0 { print() }
-            print("🧪 Trial \(i + 1)")
-            print("⚡ Prompt:     \(fmt(r.promptTps)) tokens/sec")
-            print("🏃 Generation: \(fmt(r.genTps)) tokens/sec")
+        // Run trials concurrently in batches of `concurrentRequests`
+        var trials: [TrialResult] = []
+        trials.reserveCapacity(numTrials)
+
+        var batchStart = 0
+        while batchStart < numTrials {
+            let batchEnd = min(batchStart + concurrentRequests, numTrials)
+            let batchCount = batchEnd - batchStart
+
+            var batchResults: [TrialResult] = []
+            batchResults.reserveCapacity(batchCount)
+
+            // Run trials in this batch concurrently using a task group
+            await withTaskGroup(of: TrialResult.self, body: { group in
+                for i in batchStart..<batchEnd {
+                    group.addTask {
+                        let result: TrialResult
+                        do {
+                            if let enginePool {
+                                let idx = try await enginePool.acquire()
+                                result = try await runTrial(engine: enginePool.engine(at: idx), prompt: prompt, sampling: sampling)
+                                try? await enginePool.release(idx)
+                            } else {
+                                result = try await runTrial(engine: engine, prompt: prompt, sampling: sampling)
+                            }
+                        } catch {
+                            result = TrialResult(promptTps: 0, genTps: 0)
+                        }
+                        return result
+                    }
+                }
+                while let result = await group.next() {
+                    batchResults.append(result)
+                }
+            })
+
+            // Append batch results and print them
+            trials.append(contentsOf: batchResults)
+            for (index, r) in batchResults.enumerated() {
+                if batchStart + index > 0 { print() }
+                print("🧪 Trial \(batchStart + index + 1)")
+                print("⚡ Prompt:     \(fmt(r.promptTps)) tokens/sec")
+                print("🏃 Generation: \(fmt(r.genTps)) tokens/sec")
+            }
+
+            batchStart = batchEnd
         }
 
         let n = Double(trials.count)
@@ -202,6 +305,20 @@ struct LLMBenchmark: AsyncParsableCommand {
         let genTps = genTime > 0 ? Double(decodeCount) / genTime : 0
 
         return TrialResult(promptTps: promptTps, genTps: genTps)
+    }
+
+    /// Non-throwing wrapper around `runTrial` so it can be used in a `withTaskGroup` task
+    /// where the closure body must not throw.
+    private func runTrialSafely(
+        engine: any InferenceEngine,
+        prompt: [Int32],
+        sampling: SamplingConfiguration
+    ) async -> TrialResult {
+        do {
+            return try await runTrial(engine: engine, prompt: prompt, sampling: sampling)
+        } catch {
+            return TrialResult(promptTps: 0, genTps: 0)
+        }
     }
 
     // MARK: - Helpers
