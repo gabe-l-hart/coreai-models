@@ -720,10 +720,23 @@ class BaseForCausalLM(torch.nn.Module):
                 embedding table is not quantized to int8.
                 Ignored for non-iOS model classes.
         """
-        model_dir = snapshot_download(
-            huggingface_model_id,
-            allow_patterns=["*.safetensors", "*.safetensors.index.json", "config.json"],
-        )
+        # If the model id points to an existing local path, use it directly
+        # instead of downloading from the HuggingFace hub. This supports
+        # loading models from a local checkpoint directory.
+        if os.path.isdir(huggingface_model_id):
+            model_dir = huggingface_model_id
+        elif os.path.isfile(huggingface_model_id):
+            # A single file path cannot be used as a snapshot directory;
+            # fall back to the hub download.
+            model_dir = snapshot_download(
+                huggingface_model_id,
+                allow_patterns=["*.safetensors", "*.safetensors.index.json", "config.json"],
+            )
+        else:
+            model_dir = snapshot_download(
+                huggingface_model_id,
+                allow_patterns=["*.safetensors", "*.safetensors.index.json", "config.json"],
+            )
 
         raw_config = AutoConfig.from_pretrained(model_dir)
         hf_config = getattr(raw_config, hf_config_attr) if hf_config_attr else raw_config
